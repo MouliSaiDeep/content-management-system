@@ -1,0 +1,70 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["fullTextSearch"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  AUTHOR
+  PUBLIC
+}
+
+enum Status {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(PUBLIC)
+  posts        Post[]
+  revisions    PostRevision[]
+
+  @@map("users")
+}
+
+model Post {
+  id           Int       @id @default(autoincrement())
+  title        String
+  slug         String    @unique
+  content      String
+  status       Status    @default(DRAFT)
+  authorId     Int
+  author       User      @relation(fields: [authorId], references: [id])
+  scheduledFor DateTime?
+  publishedAt  DateTime?
+  revisions    PostRevision[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([status])
+  @@index([scheduledFor])
+  @@index([publishedAt])
+  @@index([authorId])
+  @@map("posts")
+}
+
+model PostRevision {
+  id                Int      @id @default(autoincrement())
+  postId            Int
+  post              Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  titleSnapshot     String
+  contentSnapshot   String
+  revisionAuthorId  Int
+  revisionAuthor    User     @relation(fields: [revisionAuthorId], references: [id])
+  revisionTimestamp DateTime @default(now())
+
+  @@index([postId])
+  @@map("post_revisions")
+}
