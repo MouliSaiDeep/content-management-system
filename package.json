@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "ts-node src/index.ts",
+    "worker": "ts-node src/workers/index.ts"
   },
   "keywords": [],
   "author": "",
@@ -31,6 +33,9 @@
     "@types/bcrypt": "^6.0.0",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/pg": "^8.16.0"
+    "@types/node-fetch": "^2.6.13",
+    "@types/pg": "^8.16.0",
+    "node-fetch": "^2.7.0",
+    "ts-node": "^10.9.2"
   }
 }
