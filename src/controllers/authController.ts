@@ -44,7 +44,17 @@ export const register = async (req: Request, res: Response): Promise<void> => {
 
     const token = generateToken({ userId: user.id, role: user.role });
 
-    res.status(201).json({ token, user: { id: user.id, username: user.username, email: user.email, role: user.role } });
+    res
+      .status(201)
+      .json({
+        token,
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          role: user.role,
+        },
+      });
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({ errors: error.errors });
@@ -68,7 +78,15 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 
     const token = generateToken({ userId: user.id, role: user.role });
 
-    res.json({ token, user: { id: user.id, username: user.username, email: user.email, role: user.role } });
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+      },
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({ errors: error.errors });
@@ -79,7 +97,28 @@ export const login = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-export const me = async (req: Request, res: Response): Promise<void> => {
-  // To be implemented with Auth Middleware
-  res.status(501).json({ message: "Not implemented yet" });
+import { AuthRequest } from "../middleware/authMiddleware";
+
+export const me = async (req: AuthRequest, res: Response): Promise<void> => {
+  if (!req.user) {
+    res.status(401).json({ message: "Not authenticated" });
+    return;
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { id: true, username: true, email: true, role: true },
+    });
+
+    if (!user) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+
+    res.json({ user });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
 };

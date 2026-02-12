@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 const JWT_SECRET = process.env.JWT_SECRET || "super-secret-key";
 const JWT_EXPIRES_IN = "1d";
 
-interface TokenPayload {
+export interface TokenPayload {
   userId: number;
   role: string;
 }
