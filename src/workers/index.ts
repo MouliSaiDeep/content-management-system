@@ -75,8 +75,6 @@ const worker = new Worker(
 
 // Setup the scheduled check
 const setupScheduler = async () => {
-  // We add a repeatable job that runs every minute
-  // We use a fixed jobId 'check-scheduled-cron' so it doesn't duplicate on restarts
   await publishingQueue.add(
     "check-scheduled",
     {},
@@ -85,7 +83,7 @@ const setupScheduler = async () => {
       jobId: "check-scheduled-cron",
     },
   );
-  console.log("Scheduler setup complete regarding check-scheduled job.");
+  console.log("Scheduler setup complete.");
 };
 
 setupScheduler().catch((err) =>

@@ -135,7 +135,6 @@ export const getPublishedPosts = async (
       ];
     }
 
-    // Try to cache the first page of results if no search is involved
     const cacheKey = `published_posts:${page}:${limit}`;
     if (!search && page === 1) {
       const cached = await cacheService.get(cacheKey);
@@ -170,7 +169,7 @@ export const getPublishedPosts = async (
     };
 
     if (!search && page === 1) {
-      await cacheService.set(cacheKey, JSON.stringify(result), 300); // Cache for 5 mins
+      await cacheService.set(cacheKey, JSON.stringify(result), 300);
     }
 
     res.json(result);
@@ -199,12 +198,6 @@ export const getPostById = async (
       res.status(404).json({ message: "Post not found" });
       return;
     }
-
-    // Capture the logic: Author can see everything, others can only see PUBLISHED?
-    // Requirement says:
-    // GET /posts/{id}: Retrieve a specific post by ID. (Author only)
-    // GET /posts/published/{id}: Retrieve a specific published post by ID. (Public access)
-    // So this endpoint (getPostById) checks if user is author.
 
     if (post.authorId !== userId) {
       res.status(403).json({ message: "Forbidden" });
@@ -244,7 +237,7 @@ export const getPublishedPostById = async (
       return;
     }
 
-    await cacheService.set(cacheKey, JSON.stringify(post), 3600); // Cache for 1 hour
+    await cacheService.set(cacheKey, JSON.stringify(post), 3600);
 
     res.json(post);
   } catch (error) {
@@ -281,9 +274,7 @@ export const updatePost = async (
       return;
     }
 
-    // Use transaction for revision creation and post update
     const updatedPost = await prisma.$transaction(async (prisma) => {
-      // Create a revision before updating
       await prisma.postRevision.create({
         data: {
           postId: Number(id),
@@ -315,7 +306,6 @@ export const updatePost = async (
       }
     }
 
-    // Invalidate cache
     await cacheService.del(`post:${id}`);
 
     res.json(updatedPost);
@@ -351,7 +341,6 @@ export const deletePost = async (
 
     await prisma.post.delete({ where: { id: Number(id) } });
 
-    // Invalidate cache
     await cacheService.del(`post:${id}`);
 
     res.status(204).send();
@@ -389,7 +378,6 @@ export const publishPost = async (
       },
     });
 
-    // Invalidate cache
     await cacheService.del(`post:${id}`);
 
     res.json(updatedPost);
@@ -438,7 +426,6 @@ export const schedulePost = async (
       await publishingQueue.add("publish-post", { postId: post.id }, { delay });
     }
 
-    // Invalidate cache
     await cacheService.del(`post:${id}`);
 
     res.json(updatedPost);
@@ -488,7 +475,6 @@ export const restorePostRevision = async (
       return;
     }
 
-    // Check permissions
     if (post.authorId !== userId) {
       res.status(403).json({ message: "Forbidden" });
       return;
@@ -503,7 +489,7 @@ export const restorePostRevision = async (
       return;
     }
 
-    // Create a new revision of the CURRENT state before restoring the old one
+    // Save current state as revision
     await prisma.postRevision.create({
       data: {
         postId: Number(id),
@@ -513,13 +499,12 @@ export const restorePostRevision = async (
       },
     });
 
-    // Restore content
     const restoredPost = await prisma.post.update({
       where: { id: Number(id) },
       data: {
         title: revision.titleSnapshot,
         content: revision.contentSnapshot,
-        status: "DRAFT", // Reset to draft on restore? Or keep current? Let's reset to DRAFT for safety.
+        status: "DRAFT",
       },
     });
 

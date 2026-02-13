@@ -31,7 +31,7 @@ router.post("/:id/publish", authenticate, publishPost);
 router.post("/:id/schedule", authenticate, schedulePost);
 
 // Revision routes
-router.get("/:id/revisions", authenticate, getPostRevisions); // Authenticated? Maybe just public if posts are public? Let's keep auth for now as revisions might be internal.
+router.get("/:id/revisions", authenticate, getPostRevisions);
 router.post(
   "/:id/revisions/:revisionId/restore",
   authenticate,

@@ -2,14 +2,12 @@ import { Request, Response } from "express";
 import { AuthRequest } from "../middleware/authMiddleware";
 import path from "path";
 
-// Function to handle the upload
 export const uploadMedia = (req: AuthRequest, res: Response): void => {
   if (!req.file) {
     res.status(400).json({ message: "No file uploaded" });
     return;
   }
 
-  // Construct the public URL
   const baseUrl = process.env.BASE_URL || "http://localhost:3000";
   const fileUrl = `${baseUrl}/uploads/${req.file.filename}`;
 

@@ -90,7 +90,6 @@ describe("CMS Backend API Tests", () => {
         .set("Authorization", `Bearer ${authToken}`);
       expect(res.status).toBe(200);
       expect(res.body.data).toBeInstanceOf(Array);
-      // We just created one, so it should be there
       expect(res.body.data.length).toBeGreaterThan(0);
     });
 
@@ -150,7 +149,6 @@ describe("CMS Backend API Tests", () => {
   describe("Search", () => {
     it("should search for posts", async () => {
       // First ensure we have a published post with specific content
-      // We used postId before, let's update it back to PUBLISHED for search test
       await request(app)
         .put(`/api/posts/${postId}`)
         .set("Authorization", `Bearer ${authToken}`)
@@ -159,7 +157,6 @@ describe("CMS Backend API Tests", () => {
           status: "PUBLISHED",
         });
 
-      // Search via public endpoint
       const res = await request(app).get(
         "/api/posts/published?search=Searchable",
       );
