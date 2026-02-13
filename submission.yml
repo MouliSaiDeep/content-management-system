@@ -1,0 +1,11 @@
+version: 1.0.0
+setup:
+  - npm install
+  - npx prisma generate
+  - npx prisma db push --accept-data-loss
+run:
+  - npm run dev
+test:
+  - npx jest tests/api.test.ts
+worker:
+  - npm run worker

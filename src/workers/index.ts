@@ -1,5 +1,9 @@
 import { Worker } from "bullmq";
 import prisma from "../lib/prisma";
+import { publishingQueue } from "../lib/queue";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const connection = {
   host: process.env.REDIS_HOST || "localhost",
@@ -11,37 +15,81 @@ console.log("Starting worker...", connection);
 const worker = new Worker(
   "publishing-queue",
   async (job) => {
-    console.log(`Processing job ${job.id}:`, job.data);
-    const { postId } = job.data;
+    console.log(`Processing job ${job.name} (${job.id}):`, job.data);
 
-    try {
-      const post = await prisma.post.findUnique({ where: { id: postId } });
+    if (job.name === "check-scheduled") {
+      try {
+        const now = new Date();
+        const posts = await prisma.post.findMany({
+          where: {
+            status: "SCHEDULED",
+            scheduledFor: { lte: now },
+          },
+        });
 
-      if (!post) {
-        console.error(`Post ${postId} not found`);
-        return;
+        console.log(`Found ${posts.length} scheduled posts to publish.`);
+
+        for (const post of posts) {
+          await publishingQueue.add("publish-post", { postId: post.id });
+        }
+      } catch (error) {
+        console.error("Error checking scheduled posts:", error);
+        throw error;
       }
+      return;
+    }
 
-      if (post.status === "PUBLISHED") {
-        console.log(`Post ${postId} is already published`);
-        return;
+    if (job.name === "publish-post") {
+      const { postId } = job.data;
+
+      try {
+        const post = await prisma.post.findUnique({ where: { id: postId } });
+
+        if (!post) {
+          console.error(`Post ${postId} not found`);
+          return;
+        }
+
+        if (post.status === "PUBLISHED") {
+          console.log(`Post ${postId} is already published`);
+          return;
+        }
+
+        await prisma.post.update({
+          where: { id: postId },
+          data: {
+            status: "PUBLISHED",
+            publishedAt: new Date(),
+          },
+        });
+
+        console.log(`Post ${postId} published successfully`);
+      } catch (error) {
+        console.error(`Error publishing post ${postId}:`, error);
+        throw error;
       }
-
-      await prisma.post.update({
-        where: { id: postId },
-        data: {
-          status: "PUBLISHED",
-          publishedAt: new Date(),
-        },
-      });
-
-      console.log(`Post ${postId} published successfully`);
-    } catch (error) {
-      console.error(`Error publishing post ${postId}:`, error);
-      throw error;
     }
   },
   { connection },
+);
+
+// Setup the scheduled check
+const setupScheduler = async () => {
+  // We add a repeatable job that runs every minute
+  // We use a fixed jobId 'check-scheduled-cron' so it doesn't duplicate on restarts
+  await publishingQueue.add(
+    "check-scheduled",
+    {},
+    {
+      repeat: { every: 60000 },
+      jobId: "check-scheduled-cron",
+    },
+  );
+  console.log("Scheduler setup complete regarding check-scheduled job.");
+};
+
+setupScheduler().catch((err) =>
+  console.error("Failed to setup scheduler:", err),
 );
 
 worker.on("completed", (job) => {

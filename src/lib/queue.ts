@@ -5,4 +5,16 @@ const connection = {
   port: Number(process.env.REDIS_PORT) || 6379,
 };
 
-export const publishingQueue = new Queue("publishing-queue", { connection });
+let publishingQueue: Queue;
+
+// Mock queue for testing
+if (process.env.NODE_ENV === "test") {
+  // @ts-ignore
+  publishingQueue = {
+    add: async () => Promise.resolve(),
+  } as any;
+} else {
+  publishingQueue = new Queue("publishing-queue", { connection });
+}
+
+export { publishingQueue };

@@ -3,6 +3,7 @@ import { AuthRequest } from "../middleware/authMiddleware";
 import prisma from "../lib/prisma";
 import { z } from "zod";
 import { publishingQueue } from "../lib/queue";
+import { cacheService } from "../services/cacheService";
 
 const createPostSchema = z.object({
   title: z.string().min(3),
@@ -76,38 +77,27 @@ export const createPost = async (
   }
 };
 
-export const getAllPosts = async (
-  req: Request,
+export const getMyPosts = async (
+  req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 10;
-    const status = req.query.status as string | undefined;
-    const search = req.query.search as string | undefined;
+    const userId = req.user?.userId;
 
-    const where: any = {};
-    if (status) {
-      where.status = status;
+    if (!userId) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
     }
 
-    if (search) {
-      where.OR = [
-        { title: { contains: search, mode: "insensitive" } },
-        { content: { contains: search, mode: "insensitive" } },
-      ];
-    }
+    const where: any = { authorId: userId };
 
     const posts = await prisma.post.findMany({
       where,
       skip: (page - 1) * limit,
       take: limit,
       orderBy: { createdAt: "desc" },
-      include: {
-        author: {
-          select: { id: true, username: true },
-        },
-      },
     });
 
     const total = await prisma.post.count({ where });
@@ -127,12 +117,77 @@ export const getAllPosts = async (
   }
 };
 
-export const getPostById = async (
+export const getPublishedPosts = async (
   req: Request,
   res: Response,
 ): Promise<void> => {
   try {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+    const search = req.query.search as string | undefined;
+
+    const where: any = { status: "PUBLISHED" };
+
+    if (search) {
+      where.OR = [
+        { title: { contains: search, mode: "insensitive" } },
+        { content: { contains: search, mode: "insensitive" } },
+      ];
+    }
+
+    // Try to cache the first page of results if no search is involved
+    const cacheKey = `published_posts:${page}:${limit}`;
+    if (!search && page === 1) {
+      const cached = await cacheService.get(cacheKey);
+      if (cached) {
+        res.json(JSON.parse(cached));
+        return;
+      }
+    }
+
+    const posts = await prisma.post.findMany({
+      where,
+      skip: (page - 1) * limit,
+      take: limit,
+      orderBy: { publishedAt: "desc" },
+      include: {
+        author: {
+          select: { id: true, username: true },
+        },
+      },
+    });
+
+    const total = await prisma.post.count({ where });
+
+    const result = {
+      data: posts,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+
+    if (!search && page === 1) {
+      await cacheService.set(cacheKey, JSON.stringify(result), 300); // Cache for 5 mins
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const getPostById = async (
+  req: AuthRequest,
+  res: Response,
+): Promise<void> => {
+  try {
     const { id } = req.params;
+    const userId = req.user?.userId;
+
     const post = await prisma.post.findUnique({
       where: { id: Number(id) },
       include: {
@@ -144,6 +199,52 @@ export const getPostById = async (
       res.status(404).json({ message: "Post not found" });
       return;
     }
+
+    // Capture the logic: Author can see everything, others can only see PUBLISHED?
+    // Requirement says:
+    // GET /posts/{id}: Retrieve a specific post by ID. (Author only)
+    // GET /posts/published/{id}: Retrieve a specific published post by ID. (Public access)
+    // So this endpoint (getPostById) checks if user is author.
+
+    if (post.authorId !== userId) {
+      res.status(403).json({ message: "Forbidden" });
+      return;
+    }
+
+    res.json(post);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const getPublishedPostById = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const cacheKey = `post:${id}`;
+    const cachedPost = await cacheService.get(cacheKey);
+
+    if (cachedPost) {
+      res.json(JSON.parse(cachedPost));
+      return;
+    }
+
+    const post = await prisma.post.findUnique({
+      where: { id: Number(id) },
+      include: {
+        author: { select: { id: true, username: true } },
+      },
+    });
+
+    if (!post || post.status !== "PUBLISHED") {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+
+    await cacheService.set(cacheKey, JSON.stringify(post), 3600); // Cache for 1 hour
 
     res.json(post);
   } catch (error) {
@@ -175,33 +276,32 @@ export const updatePost = async (
       return;
     }
 
-    if (post.authorId !== userId && req.user?.role !== "ADMIN") {
-      // Assuming ADMIN role exists or will exist, keeping simple for now
-      // For now, only author can update.
-      if (post.authorId !== userId) {
-        res.status(403).json({ message: "Forbidden" });
-        return;
-      }
+    if (post.authorId !== userId) {
+      res.status(403).json({ message: "Forbidden" });
+      return;
     }
 
-    // Create a revision before updating
-    await prisma.postRevision.create({
-      data: {
-        postId: Number(id),
-        titleSnapshot: post.title,
-        contentSnapshot: post.content,
-        revisionAuthorId: userId,
-      },
-    });
+    // Use transaction for revision creation and post update
+    const updatedPost = await prisma.$transaction(async (prisma) => {
+      // Create a revision before updating
+      await prisma.postRevision.create({
+        data: {
+          postId: Number(id),
+          titleSnapshot: post.title,
+          contentSnapshot: post.content,
+          revisionAuthorId: userId,
+        },
+      });
 
-    const updatedPost = await prisma.post.update({
-      where: { id: Number(id) },
-      data: {
-        title,
-        content,
-        status,
-        scheduledFor,
-      },
+      return prisma.post.update({
+        where: { id: Number(id) },
+        data: {
+          title,
+          content,
+          status,
+          scheduledFor,
+        },
+      });
     });
 
     if (status === "SCHEDULED" && scheduledFor) {
@@ -214,6 +314,9 @@ export const updatePost = async (
         );
       }
     }
+
+    // Invalidate cache
+    await cacheService.del(`post:${id}`);
 
     res.json(updatedPost);
   } catch (error) {
@@ -248,7 +351,97 @@ export const deletePost = async (
 
     await prisma.post.delete({ where: { id: Number(id) } });
 
+    // Invalidate cache
+    await cacheService.del(`post:${id}`);
+
     res.status(204).send();
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const publishPost = async (
+  req: AuthRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.userId;
+
+    const post = await prisma.post.findUnique({ where: { id: Number(id) } });
+
+    if (!post) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+
+    if (post.authorId !== userId) {
+      res.status(403).json({ message: "Forbidden" });
+      return;
+    }
+
+    const updatedPost = await prisma.post.update({
+      where: { id: Number(id) },
+      data: {
+        status: "PUBLISHED",
+        publishedAt: new Date(),
+      },
+    });
+
+    // Invalidate cache
+    await cacheService.del(`post:${id}`);
+
+    res.json(updatedPost);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const schedulePost = async (
+  req: AuthRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { scheduledFor } = req.body;
+    const userId = req.user?.userId;
+
+    if (!scheduledFor) {
+      res.status(400).json({ message: "scheduledFor is required" });
+      return;
+    }
+
+    const post = await prisma.post.findUnique({ where: { id: Number(id) } });
+
+    if (!post) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+
+    if (post.authorId !== userId) {
+      res.status(403).json({ message: "Forbidden" });
+      return;
+    }
+
+    const updatedPost = await prisma.post.update({
+      where: { id: Number(id) },
+      data: {
+        status: "SCHEDULED",
+        scheduledFor,
+      },
+    });
+
+    const delay = new Date(scheduledFor).getTime() - Date.now();
+    if (delay > 0) {
+      await publishingQueue.add("publish-post", { postId: post.id }, { delay });
+    }
+
+    // Invalidate cache
+    await cacheService.del(`post:${id}`);
+
+    res.json(updatedPost);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Internal server error" });
@@ -296,7 +489,7 @@ export const restorePostRevision = async (
     }
 
     // Check permissions
-    if (post.authorId !== userId && req.user?.role !== "ADMIN") {
+    if (post.authorId !== userId) {
       res.status(403).json({ message: "Forbidden" });
       return;
     }

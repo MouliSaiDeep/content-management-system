@@ -2,8 +2,27 @@ import { Request, Response, NextFunction } from "express";
 import { verifyToken, TokenPayload } from "../utils/jwt";
 import prisma from "../lib/prisma";
 
+declare global {
+  namespace Express {
+    namespace Multer {
+      interface File {
+        fieldname: string;
+        originalname: string;
+        encoding: string;
+        mimetype: string;
+        size: number;
+        destination: string;
+        filename: string;
+        path: string;
+        buffer: Buffer;
+      }
+    }
+  }
+}
+
 export interface AuthRequest extends Request {
   user?: TokenPayload;
+  file?: Express.Multer.File;
 }
 
 export const authenticate = async (
