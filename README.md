@@ -47,7 +47,10 @@ A robust backend API for a content management system, built with Node.js, Expres
     npm install
     ```
 2.  Start required services (Postgres, Redis) manually or via Docker.
-3.  Configure `.env` file with your database and redis credentials.
+3.  Copy `.env.example` to `.env` and configure your credentials:
+    ```bash
+    cp .env.example .env
+    ```
 4.  Run migrations:
     ```bash
     npx prisma migrate dev
